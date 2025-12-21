@@ -1,8 +1,10 @@
-import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { EditCompanyDto, PDFConfigDto } from '@/modules/company/dto/company.dto';
 import { MailTemplate, MailTemplateType, WebhookEvent } from '../../../prisma/generated/prisma/client'
 
 import { WebhookDispatcherService } from '../webhooks/webhook-dispatcher.service';
+import { createHash } from 'crypto';
+import { logger } from '@/logger/logger.service';
 import prisma from '@/prisma/prisma.service';
 import { randomUUID } from 'crypto';
 
@@ -18,19 +20,28 @@ export interface EmailTemplate {
 
 @Injectable()
 export class CompanyService {
-    private readonly logger: Logger;
+
+    private lastCompanyHash?: string;
+
+    private computeHash(payload: any): string {
+        try {
+            const hash = createHash('sha1');
+            hash.update(JSON.stringify(payload));
+            return hash.digest('hex');
+        } catch (e) {
+            return String(Date.now());
+        }
+    }
 
     constructor(private readonly webhookDispatcher: WebhookDispatcherService) {
-        this.logger = new Logger(CompanyService.name);
     }
 
     async getCompanyInfo() {
         const company = await prisma.company.findFirst({ include: { emailTemplates: true } });
-
         if (!company) {
-            return null
+            logger.warn('No company found', { category: 'company' });
+            return null;
         }
-
         await prisma.$transaction([
             prisma.mailTemplate.upsert({
                 where: {
@@ -44,7 +55,6 @@ export class CompanyService {
                 },
                 update: {}
             }),
-
             prisma.mailTemplate.upsert({
                 where: {
                     companyId_type: { companyId: company.id, type: MailTemplateType.VERIFICATION_CODE }
@@ -57,7 +67,6 @@ export class CompanyService {
                 },
                 update: {}
             }),
-
             prisma.mailTemplate.upsert({
                 where: {
                     companyId_type: { companyId: company.id, type: MailTemplateType.INVOICE }
@@ -70,7 +79,6 @@ export class CompanyService {
                 },
                 update: {}
             }),
-
             prisma.mailTemplate.upsert({
                 where: {
                     companyId_type: { companyId: company.id, type: MailTemplateType.RECEIPT }
@@ -84,7 +92,16 @@ export class CompanyService {
                 update: {}
             })
         ]);
-
+        // Compute hash and log only on init or when company data changed
+        const companyData = company;
+        const hash = this.computeHash(companyData);
+        if (!this.lastCompanyHash) {
+            this.lastCompanyHash = hash;
+            logger.info('Company fetch initialized', { category: 'company', details: { companyId: company.id, hash } });
+        } else if (this.lastCompanyHash !== hash) {
+            this.lastCompanyHash = hash;
+            logger.info('Company fetched data changed', { category: 'company', details: { companyId: company.id, hash } });
+        }
         return await prisma.company.findFirst();
     }
 
@@ -94,6 +111,7 @@ export class CompanyService {
         });
 
         if (!existingCompany?.pdfConfig) {
+            logger.error('No PDF configuration found for the company', { category: 'company' });
             throw new BadRequestException('No PDF configuration found for the company');
         }
 
@@ -159,6 +177,7 @@ export class CompanyService {
         });
 
         if (!existingCompany?.pdfConfig) {
+            logger.error('No PDF configuration found for the company', { category: 'company' });
             throw new BadRequestException('No PDF configuration found for the company');
         }
 
@@ -219,13 +238,15 @@ export class CompanyService {
             }
         });
 
+        logger.info('Company PDF config updated', { category: 'company', details: { companyId: existingCompany.id } });
+
         try {
             await this.webhookDispatcher.dispatch(WebhookEvent.COMPANY_PDF_CONFIG_UPDATED, {
                 config: updatedConfig,
                 company: existingCompany,
             });
         } catch (error) {
-            this.logger.error('Failed to dispatch COMPANY_PDF_CONFIG_UPDATED webhook', error);
+            logger.error('Failed to dispatch COMPANY_PDF_CONFIG_UPDATED webhook', { category: 'company', details: { error } });
         }
 
         return updatedConfig;
@@ -246,12 +267,14 @@ export class CompanyService {
                 }
             });
 
+            logger.info('Company info updated', { category: 'company', details: { companyId: updatedCompany.id } });
+
             try {
                 await this.webhookDispatcher.dispatch(WebhookEvent.COMPANY_UPDATED, {
                     company: updatedCompany,
                 });
             } catch (error) {
-                this.logger.error('Failed to dispatch COMPANY_UPDATED webhook', error);
+                logger.error('Failed to dispatch COMPANY_UPDATED webhook', { category: 'company', details: { error } });
             }
 
             return updatedCompany;
@@ -291,7 +314,7 @@ export class CompanyService {
                     company: newCompany,
                 });
             } catch (error) {
-                this.logger.error('Failed to dispatch COMPANY_CREATED webhook', error);
+                logger.error('Failed to dispatch COMPANY_CREATED webhook', error);
             }
 
             return newCompany;
@@ -304,6 +327,7 @@ export class CompanyService {
         });
 
         if (!existingCompany?.emailTemplates) {
+            logger.error('No email templates found for the company', { category: 'company' });
             throw new BadRequestException('No email templates found for the company');
         }
 
@@ -349,6 +373,7 @@ export class CompanyService {
             include: { company: true }
         });
         if (!existingTemplate) {
+            logger.error(`Email template with id ${id} not found`, { category: 'company', details: { id } });
             throw new BadRequestException(`Email template with id ${id} not found`);
         }
 
@@ -361,15 +386,15 @@ export class CompanyService {
             include: { company: true }
         });
 
+        logger.info('Email template updated', { category: 'company', details: { templateId: id } });
         try {
             await this.webhookDispatcher.dispatch(WebhookEvent.COMPANY_EMAIL_TEMPLATE_UPDATED, {
                 company: existingTemplate.company,
                 template: existingTemplate,
             });
         } catch (error) {
-            this.logger.error('Failed to dispatch COMPANY_EMAIL_TEMPLATE_UPDATED webhook', error);
+            logger.error('Failed to dispatch COMPANY_EMAIL_TEMPLATE_UPDATED webhook', { category: 'company', details: { error } });
         }
-
         return existingTemplate;
     }
 }

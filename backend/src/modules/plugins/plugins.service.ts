@@ -6,6 +6,7 @@ import { EInvoice } from '@fin.cx/einvoice';
 import { PluginRegistry } from '../../plugins';
 import { PluginType } from '../../../prisma/generated/prisma/client';
 import { generateWebhookSecret } from '@/utils/webhook-security';
+import { logger } from '@/logger/logger.service';
 import prisma from '@/prisma/prisma.service';
 import { randomUUID } from 'crypto';
 import { simpleGit } from 'simple-git';
@@ -36,18 +37,17 @@ const PLUGIN_DIRS = [PLUGIN_DIR, join(process.cwd(), 'src', 'in-app-plugins')];
 
 @Injectable()
 export class PluginsService {
-  private readonly logger = new Logger(PluginsService.name);
   private readonly plugins: IPlugin[] = [];
   private pluginRegistry = PluginRegistry.getInstance();
   private static isInitialized = false;
 
   constructor() {
     if (!PluginsService.isInitialized) {
-      this.logger.log('Loading plugins...');
+      logger.info('Loading plugins...', { category: 'plugin' });
       this.loadExistingPlugins();
 
       this.pluginRegistry.initializeIfNeeded().catch(err => {
-        this.logger.error('Failed to initialize plugin registry:', err);
+        logger.error('Failed to initialize plugin registry', { category: 'plugin', details: { error: err } });
       });
       PluginsService.isInitialized = true;
     }
@@ -57,19 +57,18 @@ export class PluginsService {
     const pluginPath = join(PLUGIN_DIR, name);
 
     if (!existsSync(pluginPath)) {
-      this.logger.log(`Cloning plugin "${name}" from ${gitUrl}...`);
+      logger.info(`Cloning plugin "${name}" from ${gitUrl}...`, { category: 'plugin' });
       await simpleGit().clone(gitUrl, pluginPath);
     }
 
     return pluginPath;
   }
 
-
   async loadExistingPlugins(): Promise<void> {
     for (const pluginDir of PLUGIN_DIRS) {
-      this.logger.log(`Loading plugins from directory: ${pluginDir}`);
+      logger.info(`Loading plugins from directory: ${pluginDir}`, { category: 'plugin' });
       if (!existsSync(pluginDir)) {
-        this.logger.warn(`Plugin directory "${pluginDir}" does not exist.`);
+        logger.warn(`Plugin directory "${pluginDir}" does not exist.`, { category: 'plugin' });
         return;
       }
 
@@ -81,7 +80,7 @@ export class PluginsService {
         try {
           await this.loadPluginFromPath(join(pluginDir, dir));
         } catch (err) {
-          this.logger.error(`Failed to load plugin "${dir}": ${err.message}`);
+          logger.error(`Failed to load plugin "${dir}"`, { category: 'plugin', details: { error: err.message } });
         }
       }
     }
@@ -93,17 +92,14 @@ export class PluginsService {
     }
     const files = readdirSync(pluginPath);
     const jsFile = files.find((f) => extname(f) === '.js');
-
     if (!jsFile) {
+      logger.error(`No .js file found in plugin directory: ${pluginPath}`, { category: 'plugin', details: { pluginPath } });
       throw new Error(`No .js file found in plugin directory: ${pluginPath}`);
     }
-
     const pluginFile = join(pluginPath, jsFile);
     const pluginModule = await import(pluginFile);
     const PluginClass = pluginModule.default;
-
     const plugin: IPlugin = new PluginClass();
-
     plugin.init?.();
     let uuid = randomUUID();
     while (this.plugins.some((p) => p.__uuid === uuid)) {
@@ -111,10 +107,8 @@ export class PluginsService {
     }
     plugin.__uuid = uuid;
     plugin.__filepath = pluginFile;
-
     this.plugins.push(plugin);
-    this.logger.log(`Plugin "${plugin.name}" loaded.`);
-
+    logger.info(`Plugin "${plugin.name}" loaded.`, { category: 'plugin', details: { pluginName: plugin.name } });
     return plugin;
   }
 
@@ -124,7 +118,7 @@ export class PluginsService {
         const path = await this.cloneRepo(config.git, config.name);
         await this.loadPluginFromPath(path);
       } catch (err) {
-        this.logger.error(`Failed to load plugin "${config.name}": ${err.message}`);
+        logger.error(`Failed to load plugin "${config.name}"`, { category: 'plugin', details: { error: err.message } });
       }
     }
   }
@@ -169,6 +163,7 @@ export class PluginsService {
     });
 
     if (!plugin) {
+      logger.error(`Plugin with id "${id}" not found`, { category: 'plugin', details: { id } });
       throw new Error(`Plugin with id "${id}" not found`);
     }
 
@@ -177,8 +172,7 @@ export class PluginsService {
         where: { id },
         data: { isActive: false, webhookUrl: null, webhookSecret: null }
       });
-
-      this.logger.log(`Plugin "${plugin.name}" is now inactive.`);
+      logger.info(`Plugin "${plugin.name}" is now inactive.`, { category: 'plugin', details: { pluginName: plugin.name } });
       return { success: true };
     }
 
@@ -191,6 +185,7 @@ export class PluginsService {
     });
 
     if (existingActivePlugin && !PluginRegistry.multiInstancePluginTypes.has(plugin.type)) {
+      logger.error(`Another plugin "${existingActivePlugin.name}" is already active for category "${plugin.type}". Please disable it first.`, { category: 'plugin', details: { pluginType: plugin.type } });
       throw new BadRequestException(`Another plugin "${existingActivePlugin.name}" is already active for category "${plugin.type}". Please disable it first.`);
     }
 
@@ -208,8 +203,7 @@ export class PluginsService {
       where: { id },
       data: { isActive: true }
     });
-
-    this.logger.log(`Plugin "${plugin.name}" is now active.`);
+    logger.info(`Plugin "${plugin.name}" is now active.`, { category: 'plugin', details: { pluginName: plugin.name } });
 
     const validation = await this.pluginValidation(id);
 
@@ -227,6 +221,7 @@ export class PluginsService {
     });
 
     if (!plugin) {
+      logger.error(`Plugin with id "${id}" not found`, { category: 'plugin', details: { id } });
       throw new BadRequestException(`Plugin with id "${id}" not found`);
     }
 
@@ -239,6 +234,7 @@ export class PluginsService {
     });
 
     if (existingActivePlugin) {
+      logger.error(`Another plugin "${existingActivePlugin.name}" is already active for category "${plugin.type}". Please disable it first.`, { category: 'plugin', details: { pluginType: plugin.type } });
       throw new BadRequestException(`Another plugin "${existingActivePlugin.name}" is already active for category "${plugin.type}". Please disable it first.`);
     }
 
@@ -249,8 +245,7 @@ export class PluginsService {
         isActive: true,
       }
     });
-
-    this.logger.log(`Plugin "${plugin.name}" configured and activated.`);
+    logger.info(`Plugin "${plugin.name}" configured and activated.`, { category: 'plugin', details: { pluginName: plugin.name } });
 
     const validation = await this.pluginValidation(id);
 
@@ -343,6 +338,7 @@ export class PluginsService {
       case 'oidc':
         return 'OIDC';
       default:
+        logger.error(`Unknown plugin type: ${type}`, { category: 'plugin', details: { type } });
         throw new Error(`Unknown plugin type: ${type}`);
     }
   }
@@ -356,6 +352,7 @@ export class PluginsService {
   async generateXml(format: string, xmlInvoice: any): Promise<string> {
     // Return XML using a plugin
     // For now, throw an error as this feature is not yet implemented
+    logger.error(`XML generation for format "${format}" not implemented yet`, { category: 'plugin', details: { format } });
     throw new Error(`XML generation for format "${format}" not implemented yet`);
   }
 
@@ -368,6 +365,7 @@ export class PluginsService {
   async deletePlugin(uuid: string): Promise<boolean> {
     const index = this.plugins.findIndex((p) => p.__uuid === uuid);
     if (index === -1) {
+      logger.error(`Plugin with UUID "${uuid}" not found`, { category: 'plugin', details: { uuid } });
       throw new Error(`Plugin with UUID "${uuid}" not found`);
     }
     const plugin = this.plugins[index];
@@ -375,10 +373,10 @@ export class PluginsService {
     if (existsSync(plugin.__filepath)) {
       let pluginDir = plugin.__filepath;
       pluginDir = join(pluginDir, '..');
-      this.logger.log(`Deleting plugin files at ${pluginDir}`);
+      logger.info(`Deleting plugin files at ${pluginDir}`, { category: 'plugin', details: { pluginName: plugin.name } });
       rmSync(pluginDir, { recursive: true, force: true });
     }
-    this.logger.log(`Plugin "${plugin.name}" deleted.`);
+    logger.info(`Plugin "${plugin.name}" deleted.`, { category: 'plugin', details: { pluginName: plugin.name } });
 
     return true
   }
@@ -394,10 +392,10 @@ export class PluginsService {
     });
 
     if (!plugin) {
+      logger.error(`Active plugin with id "${pluginId}" not found`, { category: 'plugin', details: { pluginId } });
       throw new BadRequestException(`Active plugin with id "${pluginId}" not found`);
     }
-
-    this.logger.log(`Validating plugin: ${plugin.name} (${plugin.type})`);
+    logger.info(`Validating plugin: ${plugin.name} (${plugin.type})`, { category: 'plugin', details: { pluginName: plugin.name, pluginType: plugin.type } });
 
     // Get the provider to check if it implements handleWebhook
     const provider = await this.pluginRegistry.getProvider<any>(plugin.type.toLowerCase());
@@ -407,7 +405,7 @@ export class PluginsService {
 
     // Only configure webhook if the provider implements handleWebhook
     if (provider && typeof provider.handleWebhook === 'function') {
-      this.logger.log(`Plugin ${plugin.name} supports webhooks (handleWebhook method found)`);
+      logger.info(`Plugin ${plugin.name} supports webhooks (handleWebhook method found)`, { category: 'plugin', details: { pluginName: plugin.name } });
 
       const baseUrl = process.env.APP_URL || 'http://localhost:3000';
       webhookUrl = `${baseUrl}/api/webhooks/${plugin.id}`;
@@ -420,11 +418,10 @@ export class PluginsService {
           webhookSecret
         }
       });
-
-      this.logger.log(`Generated webhook URL for plugin ${plugin.name}: ${webhookUrl}`);
-      this.logger.log(`Generated webhook secret for plugin ${plugin.name}`);
+      logger.info(`Generated webhook URL for plugin ${plugin.name}: ${webhookUrl}`, { category: 'plugin', details: { pluginName: plugin.name, webhookUrl } });
+      logger.info(`Generated webhook secret for plugin ${plugin.name}`, { category: 'plugin', details: { pluginName: plugin.name } });
     } else {
-      this.logger.log(`Plugin ${plugin.name} does not support webhooks (handleWebhook method not found)`);
+      logger.info(`Plugin ${plugin.name} does not support webhooks (handleWebhook method not found)`, { category: 'plugin', details: { pluginName: plugin.name } });
       // Clear webhook configuration if provider doesn't support it
       await prisma.plugin.update({
         where: { id: plugin.id },
@@ -439,9 +436,9 @@ export class PluginsService {
     if (provider && typeof provider.validatePlugin === 'function') {
       try {
         await provider.validatePlugin(plugin.config);
-        this.logger.log(`Plugin ${plugin.name} validated successfully by provider`);
+        logger.info(`Plugin ${plugin.name} validated successfully by provider`, { category: 'plugin', details: { pluginName: plugin.name } });
       } catch (error) {
-        this.logger.error(`Provider validation failed for plugin ${plugin.name}:`, error);
+        logger.error(`Provider validation failed for plugin ${plugin.name}`, { category: 'plugin', details: { pluginName: plugin.name, error } });
         throw new BadRequestException(`Plugin validation failed: ${error.message}`);
       }
     }
@@ -460,7 +457,7 @@ export class PluginsService {
 
     // Only generate webhook-related instructions if webhooks are supported
     if (!webhookUrl || !webhookSecret) {
-      this.logger.log(`No webhook configuration for plugin ${plugin.name}`);
+      logger.info(`No webhook configuration for plugin ${plugin.name}`, { category: 'plugin', details: { pluginName: plugin.name } });
       return instructions;
     }
 
@@ -482,7 +479,7 @@ export class PluginsService {
         break;
     }
 
-    instructions.forEach(instruction => this.logger.log(instruction));
+    instructions.forEach(instruction => logger.info(instruction, { category: 'plugin' }));
 
     return instructions;
   }

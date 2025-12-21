@@ -13,6 +13,7 @@ import { TeamsDriver } from './drivers/teams.driver';
 import { WebhookDriver } from './drivers/webhook-driver.interface';
 import { ZapierDriver } from './drivers/zapier.driver';
 import prisma from '@/prisma/prisma.service';
+import { logger } from '@/logger/logger.service';
 
 @Injectable()
 export class WebhooksService {
@@ -34,8 +35,7 @@ export class WebhooksService {
      * Handle a received webhook for a specific plugin
      */
     async handlePluginWebhook(pluginId: string, body: any, req: Request): Promise<any> {
-        this.logger.log(`Processing webhook for plugin: ${pluginId}`);
-
+        logger.info(`Processing webhook for plugin: ${pluginId}`, { category: 'webhook', details: { pluginId } });
         // Vérifier que le plugin existe et est actif
         const plugin = await prisma.plugin.findFirst({
             where: {
@@ -48,31 +48,33 @@ export class WebhooksService {
         });
 
         if (!plugin) {
+            logger.warn(`Active plugin with UUID ${pluginId} not found or has no webhook configured`, { category: 'webhook', details: { pluginId } });
             throw new NotFoundException(`Active plugin with UUID ${pluginId} not found or has no webhook configured`);
         }
 
-        this.logger.log(`Found plugin: ${plugin.name} (${plugin.type})`);
+        logger.info(`Found plugin: ${plugin.name} (${plugin.type})`, { category: 'webhook', details: { pluginId, pluginType: plugin.type } });
 
         // Récupérer le provider du plugin
         const provider = await this.pluginsService.getProviderByType<IWebhookProvider>(plugin.type.toLowerCase());
 
         if (!provider) {
+            logger.warn(`No provider found for plugin type: ${plugin.type}`, { category: 'webhook', details: { pluginType: plugin.type } });
             throw new NotFoundException(`No provider found for plugin type: ${plugin.type}`);
         }
 
         // Vérifier que le provider a une méthode handleWebhook
         if (typeof provider.handleWebhook !== 'function') {
-            this.logger.warn(`Provider for plugin ${plugin.name} does not implement handleWebhook method`);
+            logger.warn(`Provider for plugin ${plugin.name} does not implement handleWebhook method`, { category: 'webhook', details: { pluginName: plugin.name } });
             return { message: 'Webhook received but not handled by provider' };
         }
 
         // Appeler la méthode handleWebhook du provider
         try {
             const result = await provider.handleWebhook(req, body);
-            this.logger.log(`Webhook processed successfully for plugin ${plugin.name}`);
+            logger.info(`Webhook processed successfully for plugin ${plugin.name}`, { category: 'webhook', details: { pluginName: plugin.name } });
             return result;
         } catch (error) {
-            this.logger.error(`Error in provider webhook handler for plugin ${plugin.name}:`, error);
+            logger.error(`Error in provider webhook handler for plugin ${plugin.name}`, { category: 'webhook', details: { pluginName: plugin.name, error } });
             throw error;
         }
     }
@@ -106,6 +108,7 @@ export class WebhooksService {
                 ...payload,
             }, webhook.secret ?? null);
         }));
+        logger.info(`Webhooks sent for event: ${event}`, { category: 'webhook', details: { event, count: results.length } });
         return results;
     }
 }

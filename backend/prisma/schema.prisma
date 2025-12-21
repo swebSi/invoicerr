@@ -877,3 +877,32 @@ model Verification {
   @@index([identifier])
   @@map("verification")
 }
+
+// ======= END OF BETTER AUTH INTEGRATION ======= //
+
+// ======= START OF LOGGING SYSTEM ======= //
+
+enum LogLevel {
+  DEBUG
+  INFO
+  WARN
+  ERROR
+  FATAL
+}
+
+model Log {
+  id        String   @id @default(uuid())
+  level     LogLevel
+  category  String
+  message   String
+  timestamp DateTime @default(now())
+  userId    String?
+  path      String?
+  details   Json
+
+  @@index([level])
+  @@index([category])
+  @@index([timestamp])
+}
+
+// ======= END OF LOGGING SYSTEM ======= //

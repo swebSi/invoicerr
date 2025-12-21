@@ -1,4 +1,6 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
+
+import { logger } from '@/logger/logger.service';
 import prisma from '@/prisma/prisma.service';
 
 type MonthStat = { month: number; invoiced: number; revenue: number; deposits: number; };
@@ -8,7 +10,10 @@ type YearStat = { year: number; invoiced: number; revenue: number; deposits: num
 export class StatsService {
     async getMonthlyStats(year: number) {
         const company = await prisma.company.findFirst();
-        if (!company) throw new BadRequestException('No company found. Please create a company first.');
+        if (!company) {
+            logger.error('No company found. Please create a company first.', { category: 'stats' });
+            throw new BadRequestException('No company found. Please create a company first.');
+        }
 
         const startOfYear = new Date(year, 0, 1);
         const endOfYear = new Date(year, 11, 31, 23, 59, 59, 999);
@@ -122,7 +127,10 @@ export class StatsService {
 
     async getYearlyStats(startYear: number, endYear: number) {
         const company = await prisma.company.findFirst();
-        if (!company) throw new BadRequestException('No company found. Please create a company first.');
+        if (!company) {
+            logger.error('No company found. Please create a company first.', { category: 'stats' });
+            throw new BadRequestException('No company found. Please create a company first.');
+        }
 
         const startDate = new Date(startYear, 0, 1);
         const endDate = new Date(endYear, 11, 31, 23, 59, 59, 999);

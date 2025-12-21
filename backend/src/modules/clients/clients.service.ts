@@ -1,16 +1,15 @@
-import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 
 import { EditClientsDto } from '@/modules/clients/dto/clients.dto';
 import { WebhookDispatcherService } from '../webhooks/webhook-dispatcher.service';
 import { WebhookEvent } from '../../../prisma/generated/prisma/client';
+import { logger } from '@/logger/logger.service';
 import prisma from '@/prisma/prisma.service';
 
 @Injectable()
 export class ClientsService {
-    private readonly logger: Logger;
 
     constructor(private readonly webhookDispatcher: WebhookDispatcherService) {
-        this.logger = new Logger(ClientsService.name);
     }
 
     async getClients(page: string) {
@@ -69,7 +68,7 @@ export class ClientsService {
                 results: results.length,
             });
         } catch (error) {
-            this.logger.error('Failed to dispatch CLIENT_SEARCHED webhook', error);
+            logger.error('Failed to dispatch CLIENT_SEARCHED webhook', { category: 'client', details: { error } });
         }
 
         return results;
@@ -83,30 +82,36 @@ export class ClientsService {
         if (type === 'INDIVIDUAL') {
             data.name = ``;
             if (!data.contactFirstname || (data.contactFirstname as string).trim() === '') {
+                logger.error('First name is required for individual clients', { category: 'client' });
                 throw new BadRequestException('First name is required for individual clients');
             }
             if (!data.contactLastname || (data.contactLastname as string).trim() === '') {
+                logger.error('Last name is required for individual clients', { category: 'client' });
                 throw new BadRequestException('Last name is required for individual clients');
             }
         } else {
             data.contactFirstname = undefined;
             data.contactLastname = undefined;
             if (!data.name || (data.name as string).trim() === '') {
+                logger.error('Company name is required for company clients', { category: 'client' });
                 throw new BadRequestException('Company name is required for company clients');
             }
             if (!data.legalId || (data.legalId as string).trim() === '') {
+                logger.error('SIRET/SIREN (legalId) is required for company clients', { category: 'client' });
                 throw new BadRequestException('SIRET/SIREN (legalId) is required for company clients');
             }
         }
 
         const newClient = await prisma.client.create({ data });
 
+        logger.info('Client created', { category: 'client', details: { clientId: newClient.id } });
+
         try {
             await this.webhookDispatcher.dispatch(WebhookEvent.CLIENT_CREATED, {
                 client: newClient,
             });
         } catch (error) {
-            this.logger.error('Failed to dispatch CLIENT_CREATED webhook', error);
+            logger.error('Failed to dispatch CLIENT_CREATED webhook', { category: 'client', details: { error } });
         }
 
         return newClient;
@@ -114,11 +119,13 @@ export class ClientsService {
 
     async editClientsInfo(editClientsDto: EditClientsDto) {
         if (!editClientsDto.id) {
+            logger.error('Client ID is required for editing', { category: 'client' });
             throw new BadRequestException('Client ID is required for editing');
         }
 
         const existingClient = await prisma.client.findUnique({ where: { id: editClientsDto.id } });
         if (!existingClient) {
+            logger.error('Client not found', { category: 'client', details: { id: editClientsDto.id } });
             throw new BadRequestException('Client not found');
         }
 
@@ -128,16 +135,20 @@ export class ClientsService {
 
         if (type === 'INDIVIDUAL') {
             if (!data.contactFirstname || (data.contactFirstname as string).trim() === '') {
+                logger.error('First name is required for individual clients', { category: 'client' });
                 throw new BadRequestException('First name is required for individual clients');
             }
             if (!data.contactLastname || (data.contactLastname as string).trim() === '') {
+                logger.error('Last name is required for individual clients', { category: 'client' });
                 throw new BadRequestException('Last name is required for individual clients');
             }
         } else {
             if (!data.name || (data.name as string).trim() === '') {
+                logger.error('Company name is required for company clients', { category: 'client' });
                 throw new BadRequestException('Company name is required for company clients');
             }
             if (!data.legalId || (data.legalId as string).trim() === '') {
+                logger.error('SIRET/SIREN (legalId) is required for company clients', { category: 'client' });
                 throw new BadRequestException('SIRET/SIREN (legalId) is required for company clients');
             }
         }
@@ -147,12 +158,14 @@ export class ClientsService {
             data: { ...editClientsDto, isActive: true },
         });
 
+        logger.info('Client updated', { category: 'client', details: { clientId: updatedClient.id } });
+
         try {
             await this.webhookDispatcher.dispatch(WebhookEvent.CLIENT_UPDATED, {
                 client: updatedClient,
             });
         } catch (error) {
-            this.logger.error('Failed to dispatch CLIENT_UPDATED webhook', error);
+            logger.error('Failed to dispatch CLIENT_UPDATED webhook', { category: 'client', details: { error } });
         }
 
         return updatedClient;
@@ -162,6 +175,7 @@ export class ClientsService {
         const existingClient = await prisma.client.findUnique({ where: { id } });
 
         if (!existingClient) {
+            logger.error('Client not found', { category: 'client', details: { id } });
             throw new BadRequestException('Client not found');
         }
 
@@ -170,12 +184,14 @@ export class ClientsService {
             data: { isActive: false },
         });
 
+        logger.info('Client deleted', { category: 'client', details: { clientId: id } });
+
         try {
             await this.webhookDispatcher.dispatch(WebhookEvent.CLIENT_DELETED, {
                 client: existingClient,
             });
         } catch (error) {
-            this.logger.error('Failed to dispatch CLIENT_DELETED webhook', error);
+            logger.error('Failed to dispatch CLIENT_DELETED webhook', { category: 'client', details: { error } });
         }
 
         return deletedClient;

@@ -2,6 +2,9 @@ import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { existsSync, mkdirSync, readdirSync, statSync } from 'fs';
 import { normalize, resolve } from 'path';
 
+import { logger } from '@/logger/logger.service';
+import prisma from '@/prisma/prisma.service';
+
 export interface IDirectoryItem {
     name: string;
     path: string;
@@ -68,11 +71,13 @@ export class DirectoryService {
             this.validatePath(normalizedPath);
 
             if (!existsSync(normalizedPath)) {
+                logger.error(`Path does not exist: ${normalizedPath}`, { category: 'directory', details: { path: normalizedPath } });
                 throw new BadRequestException(`Path does not exist: ${normalizedPath}`);
             }
 
             const stats = statSync(normalizedPath);
             if (!stats.isDirectory()) {
+                logger.error(`Path is not a directory: ${normalizedPath}`, { category: 'directory', details: { path: normalizedPath } });
                 throw new BadRequestException(`Path is not a directory: ${normalizedPath}`);
             }
 
@@ -115,9 +120,7 @@ export class DirectoryService {
 
             return directories.filter(dir => dir.readable);
         } catch (error) {
-            if (error instanceof BadRequestException) {
-                throw error;
-            }
+            logger.error(`Failed to list directories: ${error instanceof Error ? error.message : String(error)}`, { category: 'directory', details: { error } })
             throw new BadRequestException(
                 `Failed to list directories: ${error instanceof Error ? error.message : String(error)}`
             );
@@ -164,6 +167,7 @@ export class DirectoryService {
         });
 
         if (!isAllowed) {
+            logger.error(`Access denied. Path is not within allowed directories. Allowed roots: ${this.allowedRoots.join(', ')}`, { category: 'directory', details: { path: normalizedPath, allowedRoots: this.allowedRoots } });
             throw new BadRequestException(
                 `Access denied. Path is not within allowed directories. Allowed roots: ${this.allowedRoots.join(', ')}`
             );
@@ -193,35 +197,43 @@ export class DirectoryService {
             }
 
             if (!existsSync(normalizedParent)) {
+                logger.error(`Parent path does not exist: ${normalizedParent}`, { category: 'directory', details: { parentPath: normalizedParent } });
                 throw new BadRequestException(`Parent path does not exist: ${normalizedParent}`);
             }
 
             const parentStats = statSync(normalizedParent);
             if (!parentStats.isDirectory()) {
+                logger.error(`Parent path is not a directory: ${normalizedParent}`, { category: 'directory', details: { parentPath: normalizedParent } });
                 throw new BadRequestException(`Parent path is not a directory: ${normalizedParent}`);
             }
 
             // Validate folder name
             if (!folderName || folderName.trim() === '') {
+                logger.error('Folder name cannot be empty', { category: 'directory' });
                 throw new BadRequestException('Folder name cannot be empty');
             }
 
             if (folderName.includes('/') || folderName.includes('\\')) {
+                logger.error('Folder name cannot contain path separators', { category: 'directory' });
                 throw new BadRequestException('Folder name cannot contain path separators');
             }
 
             if (folderName.includes('..')) {
+                logger.error('Folder name cannot contain parent directory references', { category: 'directory' });
                 throw new BadRequestException('Folder name cannot contain parent directory references');
             }
 
             const newPath = resolve(normalizedParent, folderName);
 
             if (existsSync(newPath)) {
+                logger.error(`Folder already exists: ${newPath}`, { category: 'directory', details: { path: newPath } });
                 throw new BadRequestException(`Folder already exists: ${newPath}`);
             }
 
             // Create the directory
             mkdirSync(newPath, { recursive: false });
+
+            logger.info('Directory created', { category: 'directory', details: { path: newPath } });
 
             return {
                 name: folderName,
@@ -230,9 +242,7 @@ export class DirectoryService {
                 readable: true,
             };
         } catch (error) {
-            if (error instanceof BadRequestException) {
-                throw error;
-            }
+            logger.error(`Failed to create directory: ${error instanceof Error ? error.message : String(error)}`, { category: 'directory', details: { error } });
             throw new BadRequestException(
                 `Failed to create directory: ${error instanceof Error ? error.message : String(error)}`
             );

@@ -5,18 +5,16 @@ import { ISigningProvider } from '@/plugins/signing/types';
 import { MailService } from '@/mail/mail.service';
 import { PluginsService } from '../plugins/plugins.service';
 import { WebhookDispatcherService } from '../webhooks/webhook-dispatcher.service';
+import { logger } from '@/logger/logger.service';
 import prisma from '@/prisma/prisma.service';
 
 @Injectable()
 export class SignaturesService {
-    private readonly logger: Logger;
-
     constructor(
         private readonly mailService: MailService,
         private readonly pluginsService: PluginsService,
         private readonly webhookDispatcher: WebhookDispatcherService
     ) {
-        this.logger = new Logger(SignaturesService.name);
     }
 
     async getSignature(signatureId: string) {
@@ -53,11 +51,18 @@ export class SignaturesService {
         });
 
         if (!quote || !quote.client || !quote.client.contactEmail) {
+            logger.error('Quote not found or client information is missing.', { category: 'signature', details: { quoteId } });
             throw new BadRequestException('Quote not found or client information is missing.');
         }
 
+        let signatureId = ""
 
-        const signatureId = await this.sendSignatureEmail(quote.id);
+        try {
+            signatureId = await this.sendSignatureEmail(quote.id);
+        } catch (error) {
+            logger.error('Failed to create signature.', { category: 'signature', details: { error, quoteId } });
+            throw error;
+        }
 
         await prisma.quote.update({
             where: { id: quoteId },
@@ -73,9 +78,10 @@ export class SignaturesService {
                 client: quote.client,
             });
         } catch (error) {
-            this.logger.error('Failed to dispatch SIGNATURE_CREATED webhook', error);
+            logger.error('Failed to dispatch SIGNATURE_CREATED webhook', error);
         }
 
+        logger.info('Signature created', { category: 'signature', details: { signatureId, quoteId } });
         return { message: 'Signature successfully created and email sent.', signature: { id: signatureId } };
     }
 
@@ -83,6 +89,7 @@ export class SignaturesService {
         const signature = await prisma.signature.findFirst({
             where: { id: signatureId, isActive: true },
             select: {
+                id: true,
                 quoteId: true,
                 quote: {
                     select: {
@@ -97,6 +104,7 @@ export class SignaturesService {
         });
 
         if (!signature || !signature.quote || !signature.quote.client || !signature.quote.client.contactEmail) {
+            logger.error('Quote not found or client information is missing.', { category: 'signature', details: { signatureId: signature?.id } });
             throw new BadRequestException('Quote not found or client information is missing.');
         }
 
@@ -121,9 +129,10 @@ export class SignaturesService {
                 otpCode,
             });
         } catch (error) {
-            this.logger.error('Failed to dispatch SIGNATURE_OTP_GENERATED webhook', error);
+            logger.error('Failed to dispatch SIGNATURE_OTP_GENERATED webhook', error);
         }
 
+        logger.info('OTP code generated', { category: 'signature', details: { signatureId, otpCode } });
         return { message: 'OTP code generated successfully.' };
     }
 
@@ -167,6 +176,7 @@ export class SignaturesService {
         });
 
         if (!signature || !signature.quote || !signature.quote.client || !signature.quote.client.contactEmail) {
+            logger.error('Quote not found or client information is missing.', { category: 'signature', details: { signatureId: signature?.id } });
             throw new BadRequestException('Quote not found or client information is missing.');
         }
 
@@ -181,6 +191,7 @@ export class SignaturesService {
         });
 
         if (!mailTemplate) {
+            logger.error('Email template for signature request not found.', { category: 'signature' });
             throw new BadRequestException('Email template for signature request not found.');
         }
 
@@ -201,9 +212,11 @@ export class SignaturesService {
         try {
             await this.mailService.sendMail(mailOptions)
         } catch (error) {
+            logger.error('Failed to send signature email', { category: 'signature', details: { error } });
             throw new BadRequestException('Failed to send signature email. Please check your SMTP configuration.');
         }
 
+        logger.info('Signature email sent', { category: 'signature', details: { signatureId: signature.id, email: signature.quote.client.contactEmail } });
         return signature.id;
     }
 
@@ -214,6 +227,7 @@ export class SignaturesService {
         });
 
         if (!signature) {
+            logger.error('Signature not found or OTP code is invalid.', { category: 'signature', details: { email } });
             throw new BadRequestException('Signature not found or OTP code is invalid.');
         }
 
@@ -223,6 +237,7 @@ export class SignaturesService {
         });
 
         if (!mailTemplate) {
+            logger.error('Email template for OTP code not found.', { category: 'signature' });
             throw new BadRequestException('Email template for OTP code not found.');
         }
 
@@ -239,9 +254,11 @@ export class SignaturesService {
         try {
             await this.mailService.sendMail(mailOptions)
         } catch (error) {
+            logger.error('Failed to send OTP email', { category: 'signature', details: { error } });
             throw new BadRequestException('Failed to send OTP email. Please check your SMTP configuration.');
         }
 
+        logger.info('OTP email sent', { category: 'signature', details: { email, otpCode } });
         return true;
     }
 
@@ -259,6 +276,7 @@ export class SignaturesService {
         });
 
         if (!signature) {
+            logger.error('Invalid or expired OTP code.', { category: 'signature', details: { signatureId, otpCode } });
             throw new BadRequestException('Invalid or expired OTP code.');
         }
 
@@ -284,9 +302,10 @@ export class SignaturesService {
                 signedAt: new Date(),
             });
         } catch (error) {
-            this.logger.error('Failed to dispatch SIGNATURE_COMPLETED webhook', error);
+            logger.error('Failed to dispatch SIGNATURE_COMPLETED webhook', error);
         }
 
+        logger.info('Quote signed', { category: 'signature', details: { signatureId, quoteId: signature.quoteId } });
         return { message: 'Quote signed successfully.' };
     }
 }

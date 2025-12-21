@@ -1,6 +1,7 @@
 import * as nodemailer from 'nodemailer';
 
 import { Injectable } from '@nestjs/common';
+import { logger } from '@/logger/logger.service';
 
 interface MailOptions {
     to?: string;
@@ -35,6 +36,7 @@ export class MailService {
         try {
             await this.transporter.sendMail(mailOptions);
         } catch (error) {
+            logger.error('Failed to send email. Please check your SMTP configuration.', { category: 'mail', details: { error } });
             throw new Error('Failed to send email. Please check your SMTP configuration.');
         }
 

@@ -1,24 +1,28 @@
-import { Injectable, Logger } from "@nestjs/common";
+import { Injectable } from "@nestjs/common";
 
 import { WebhookEvent } from "../../../prisma/generated/prisma/client";
 import { WebhooksService } from "./webhooks.service";
 import prisma from '@/prisma/prisma.service';
+import { logger } from "@/logger/logger.service";
 
 @Injectable()
 export class WebhookDispatcherService {
-    private readonly logger = new Logger(WebhookDispatcherService.name);
-
     constructor(private readonly webhookService: WebhooksService) { }
 
     async dispatch(event: WebhookEvent, payload: any) {
-        this.logger.log(`Dispatching webhook event: ${event}`);
-        const companyId = payload?.company?.id || payload?.companyId || null;
+            const companyId = payload?.company?.id || payload?.companyId || null;
 
-        const where: any = { events: { has: event } };
-        if (companyId) where.companyId = companyId;
+            const where: any = { events: { has: event } };
+            if (companyId) where.companyId = companyId;
 
-        const webhooks = await prisma.webhook.findMany({ where });
+            const webhooks = await prisma.webhook.findMany({ where });
 
-        await this.webhookService.send(webhooks, event, payload);
+        try {
+            await this.webhookService.send(webhooks, event, payload);
+            logger.info('Webhook dispatched', { category: 'webhook-dispatcher', details: { event, webhooks } });
+        } catch (error) {
+            logger.error('Error dispatching webhook', { category: 'webhook-dispatcher', details: { error, event, webhooks } });
+            throw error;
+        }
     }
 }

@@ -1,7 +1,9 @@
 import { $Enums, Company, Invoice, Quote } from '../../../prisma/generated/prisma/client'
 
 import { Injectable } from '@nestjs/common';
+import { createHash } from 'crypto';
 import prisma from '@/prisma/prisma.service';
+import { logger } from '@/logger/logger.service';
 
 interface DashboardData {
     company: Company | null,
@@ -40,8 +42,20 @@ interface DashboardData {
 
 @Injectable()
 export class DashboardService {
+    private lastDashboardHashes: Map<string, string> = new Map();
+
+    private computeHash(payload: any): string {
+        try {
+            const hash = createHash('sha1');
+            hash.update(JSON.stringify(payload));
+            return hash.digest('hex');
+        } catch (e) {
+            return String(Date.now());
+        }
+    }
 
     async getDashboardData(): Promise<DashboardData> {
+
         const quotes = await prisma.quote.groupBy({
             where: { isActive: true },
             by: ['status'],
@@ -110,7 +124,7 @@ export class DashboardService {
 
         const yearlyChangePercent = this.calculateChangePercent(currentYearRevenue, previousYearRevenue);
 
-        return {
+        const payload = {
             company,
             quotes: {
                 total: quotes.reduce((acc, q) => acc + q._count, 0),
@@ -143,7 +157,21 @@ export class DashboardService {
                 yearlyChange,
                 yearlyChangePercent,
             }
-        };
+        } as DashboardData;
+
+        // Compute hash and log only on init or when data changed
+        const key = company?.id || 'global';
+        const hash = this.computeHash(payload);
+        const prevHash = this.lastDashboardHashes.get(key);
+        if (!prevHash) {
+            this.lastDashboardHashes.set(key, hash);
+            logger.info('Dashboard initialized', { category: 'dashboard', details: { hash } });
+        } else if (prevHash !== hash) {
+            this.lastDashboardHashes.set(key, hash);
+            logger.info('Dashboard changed', { category: 'dashboard', details: { hash } });
+        }
+
+        return payload;
     }
 
 

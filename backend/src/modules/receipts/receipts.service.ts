@@ -9,6 +9,7 @@ import { WebhookDispatcherService } from '../webhooks/webhook-dispatcher.service
 import { WebhookEvent } from '../../../prisma/generated/prisma/client';
 import { baseTemplate } from '@/modules/receipts/templates/base.template';
 import { formatDate } from '@/utils/date';
+import { logger } from '@/logger/logger.service';
 import prisma from '@/prisma/prisma.service';
 import { randomUUID } from 'crypto';
 
@@ -30,6 +31,7 @@ export class ReceiptsService {
         const company = await prisma.company.findFirst();
 
         if (!company) {
+            logger.error('No company found. Please create a company first.', { category: 'receipt' });
             throw new BadRequestException('No company found. Please create a company first.');
         }
 
@@ -133,6 +135,7 @@ export class ReceiptsService {
         });
 
         if (!invoice) {
+            logger.error('Invoice not found', { category: 'receipt', details: { invoiceId } });
             throw new BadRequestException('Invoice not found');
         }
 
@@ -168,6 +171,7 @@ export class ReceiptsService {
         });
 
         if (!invoice) {
+            logger.error('Invoice not found', { category: 'receipt', details: { invoiceId: body.invoiceId } });
             throw new BadRequestException('Invoice not found');
         }
 
@@ -203,6 +207,8 @@ export class ReceiptsService {
             this.logger.error('Failed to dispatch RECEIPT_CREATED webhook', error);
         }
 
+        logger.info('Receipt created', { category: 'receipt', details: { receiptId: receipt.id, companyId: invoice.company?.id } });
+
         return receipt;
     }
 
@@ -216,6 +222,7 @@ export class ReceiptsService {
             },
         });
         if (!invoice) {
+            logger.error('Invoice not found', { category: 'receipt', details: { invoiceId } });
             throw new BadRequestException('Invoice not found');
         }
 
@@ -241,6 +248,8 @@ export class ReceiptsService {
             this.logger.error('Failed to dispatch RECEIPT_CREATED_FROM_INVOICE webhook', error);
         }
 
+        logger.info('Receipt created from invoice', { category: 'receipt', details: { receiptId: newReceipt.id, invoiceId } });
+
         return newReceipt;
     }
 
@@ -253,6 +262,7 @@ export class ReceiptsService {
         });
 
         if (!existingReceipt) {
+            logger.error('Receipt not found', { category: 'receipt', details: { receiptId: body.id } });
             throw new BadRequestException('Receipt not found');
         }
 
@@ -298,6 +308,8 @@ export class ReceiptsService {
             this.logger.error('Failed to dispatch RECEIPT_UPDATED webhook', error);
         }
 
+        logger.info('Receipt updated', { category: 'receipt', details: { receiptId: updatedReceipt.id } });
+
         return updatedReceipt;
     }
 
@@ -316,6 +328,7 @@ export class ReceiptsService {
         });
 
         if (!existingReceipt) {
+            logger.error('Receipt not found', { category: 'receipt', details: { receiptId: id } });
             throw new BadRequestException('Receipt not found');
         }
 
@@ -340,6 +353,8 @@ export class ReceiptsService {
             this.logger.error('Failed to dispatch RECEIPT_DELETED webhook', error);
         }
 
+        logger.info('Receipt deleted', { category: 'receipt', details: { receiptId: id } });
+
         return { message: 'Receipt deleted successfully' };
     }
 
@@ -361,6 +376,7 @@ export class ReceiptsService {
         });
 
         if (!receipt) {
+            logger.error('Receipt not found', { category: 'receipt', details: { receiptId } });
             throw new BadRequestException('Receipt not found');
         }
 
@@ -476,6 +492,7 @@ export class ReceiptsService {
         });
 
         if (!receipt || !receipt.invoice || !receipt.invoice.client) {
+            logger.error('Receipt or associated invoice/client not found', { category: 'receipt', details: { id } });
             throw new BadRequestException('Receipt or associated invoice/client not found');
         }
 
@@ -487,6 +504,7 @@ export class ReceiptsService {
         });
 
         if (!mailTemplate) {
+            logger.error('Email template for receipt not found.', { category: 'receipt' });
             throw new BadRequestException('Email template for receipt not found.');
         }
 
@@ -498,6 +516,7 @@ export class ReceiptsService {
         };
 
         if (!receipt.invoice.client.contactEmail) {
+            logger.error('Client has no email configured; receipt not sent', { category: 'receipt', details: { id } });
             throw new BadRequestException('Client has no email configured; receipt not sent');
         }
 
@@ -515,6 +534,7 @@ export class ReceiptsService {
         try {
             await this.mailService.sendMail(mailOptions);
         } catch (error) {
+            logger.error('Failed to send receipt email', { category: 'receipt', details: { error } });
             throw new BadRequestException('Failed to send receipt email. Please check your SMTP configuration.');
         }
 

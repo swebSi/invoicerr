@@ -2,6 +2,7 @@ import { MailService } from '@/mail/mail.service';
 import prisma from '@/prisma/prisma.service';
 import { CurrentUser } from '@/types/user';
 import { BadRequestException, Injectable } from '@nestjs/common';
+import { logger } from '@/logger/logger.service';
 
 
 @Injectable()
@@ -28,9 +29,11 @@ export class DangerService {
                 text: `An OTP code was sent to ${user.email}. The code is: ${otp}. It is valid for ${this.otpExpirationMinutes} minutes.`,
             })
         } catch (error) {
+            logger.error('Failed to send OTP email', { category: 'danger', details: { error } });
             throw new BadRequestException('Failed to send OTP email. Please check your SMTP configuration.');
         }
 
+        logger.info('OTP sent', { category: 'danger', details: { userId: user.id } });
         return { message: 'OTP sent successfully' };
     }
 
@@ -46,6 +49,7 @@ export class DangerService {
 
     async resetApp(user: CurrentUser, otp: string) {
         if (!this.isOtpValid(otp)) {
+            logger.warn('Invalid or expired OTP for resetApp', { category: 'danger', details: { userId: user.id } });
             throw new BadRequestException('Invalid or expired OTP');
         }
 
@@ -60,12 +64,13 @@ export class DangerService {
         await prisma.invoice.deleteMany();
         await prisma.signature.deleteMany();
 
-
+        logger.info('Application reset successfully', { category: 'danger', details: { userId: user.id } });
         return { message: 'Application reset successfully' };
     }
 
     async resetAll(user: CurrentUser, otp: string) {
         if (!this.isOtpValid(otp)) {
+            logger.warn('Invalid or expired OTP for resetAll', { category: 'danger', details: { userId: user.id } });
             throw new BadRequestException('Invalid or expired OTP');
         }
 
@@ -75,6 +80,7 @@ export class DangerService {
         this.OTP = null; // Clear OTP after use
         this.otpExpirationTime = null; // Clear expiration time
 
+        logger.info('All data reset successfully', { category: 'danger', details: { userId: user.id } });
         return { message: 'All data reset successfully' };
     }
 }

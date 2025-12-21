@@ -1,6 +1,6 @@
 import * as Handlebars from 'handlebars';
 
-import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { CreateQuoteDto, EditQuotesDto } from '@/modules/quotes/dto/quotes.dto';
 import { PluginType, WebhookEvent } from '../../../prisma/generated/prisma/client';
 import { getInvertColor, getPDF } from '@/utils/pdf';
@@ -11,16 +11,15 @@ import { StorageUploadService } from '@/utils/storage-upload';
 import { WebhookDispatcherService } from '../webhooks/webhook-dispatcher.service';
 import { baseTemplate } from '@/modules/quotes/templates/base.template';
 import { formatDate } from '@/utils/date';
+import { logger } from '@/logger/logger.service';
 import prisma from '@/prisma/prisma.service';
 
 @Injectable()
 export class QuotesService {
     private readonly pluginsService: PluginsService
-    private readonly logger: Logger;
 
     constructor(private readonly webhookDispatcher: WebhookDispatcherService) {
         this.pluginsService = new PluginsService();
-        this.logger = new Logger(QuotesService.name);
     }
 
     async getQuotes(page: string) {
@@ -119,6 +118,7 @@ export class QuotesService {
         const company = await prisma.company.findFirst();
 
         if (!company) {
+            logger.error('No company found. Please create a company first.', { category: 'quote' });
             throw new BadRequestException('No company found. Please create a company first.');
         }
 
@@ -127,6 +127,7 @@ export class QuotesService {
         });
 
         if (!client) {
+            logger.error('Client not found', { category: 'quote', details: { clientId: body.clientId } });
             throw new BadRequestException('Client not found');
         }
 
@@ -171,6 +172,8 @@ export class QuotesService {
             },
         });
 
+        logger.info('Quote created', { category: 'quote', details: { quoteId: quote.id, clientId: client.id } });
+
         try {
             await this.webhookDispatcher.dispatch(WebhookEvent.QUOTE_CREATED, {
                 quote,
@@ -178,7 +181,7 @@ export class QuotesService {
                 company,
             });
         } catch (error) {
-            this.logger.error('Failed to dispatch QUOTE_CREATED webhook', error);
+            logger.error('Failed to dispatch QUOTE_CREATED webhook', { category: 'quote', details: { error } });
         }
 
         return quote;
@@ -188,6 +191,7 @@ export class QuotesService {
         const { items, id, ...data } = body;
 
         if (!id) {
+            logger.error('Quote ID is required for editing', { category: 'quote' });
             throw new BadRequestException('Quote ID is required for editing');
         }
 
@@ -197,6 +201,7 @@ export class QuotesService {
         });
 
         if (!existingQuote) {
+            logger.error('Quote not found', { category: 'quote', details: { id } });
             throw new BadRequestException('Quote not found');
         }
 
@@ -268,6 +273,8 @@ export class QuotesService {
             data: { isActive: false },
         });
 
+        logger.info('Quote updated', { category: 'quote', details: { quoteId: updateQuote.id } });
+
         try {
             await this.webhookDispatcher.dispatch(WebhookEvent.QUOTE_UPDATED, {
                 quote: updateQuote,
@@ -275,7 +282,7 @@ export class QuotesService {
                 company: updateQuote.company,
             });
         } catch (error) {
-            this.logger.error('Failed to dispatch QUOTE_UPDATED webhook', error);
+            logger.error('Failed to dispatch QUOTE_UPDATED webhook', { category: 'quote', details: { error } });
         }
 
         return updateQuote;
@@ -292,6 +299,7 @@ export class QuotesService {
         });
 
         if (!existingQuote) {
+            logger.error('Quote not found', { category: 'quote', details: { id } });
             throw new BadRequestException('Quote not found');
         }
 
@@ -300,6 +308,8 @@ export class QuotesService {
             data: { isActive: false },
         });
 
+        logger.info('Quote deleted', { category: 'quote', details: { quoteId: id } });
+
         try {
             await this.webhookDispatcher.dispatch(WebhookEvent.QUOTE_DELETED, {
                 quote: existingQuote,
@@ -307,7 +317,7 @@ export class QuotesService {
                 company: existingQuote.company,
             });
         } catch (error) {
-            this.logger.error('Failed to dispatch QUOTE_DELETED webhook', error);
+            logger.error('Failed to dispatch QUOTE_DELETED webhook', { category: 'quote', details: { error } });
         }
 
         return deletedQuote;
@@ -327,6 +337,7 @@ export class QuotesService {
         });
 
         if (!quote || !quote.company || !quote.company.pdfConfig) {
+            logger.error('Quote or associated PDF config not found', { category: 'quote', details: { id: quote?.id } });
             throw new BadRequestException('Quote or associated PDF config not found');
         }
 
@@ -339,7 +350,7 @@ export class QuotesService {
                     return pdf;
                 }
             } catch (error) {
-                this.logger.error(`Error generating PDF via signing provider, falling back to built-in PDF generation`);
+                logger.error(`Error generating PDF via signing provider, falling back to built-in PDF generation`, { category: 'quote', details: { error } });
             }
         }
 
@@ -447,6 +458,7 @@ export class QuotesService {
 
     async markQuoteAsSigned(id: string) {
         if (!id) {
+            logger.error('Quote ID is required', { category: 'quote' });
             throw new BadRequestException('Quote ID is required');
         }
 
@@ -460,6 +472,7 @@ export class QuotesService {
         });
 
         if (!existingQuote) {
+            logger.error('Quote not found', { category: 'quote', details: { id } });
             throw new BadRequestException('Quote not found');
         }
 
@@ -473,6 +486,8 @@ export class QuotesService {
             },
         });
 
+        logger.info('Quote marked as signed', { category: 'quote', details: { quoteId: id } });
+
         try {
             await this.webhookDispatcher.dispatch(WebhookEvent.QUOTE_SIGNED, {
                 quote: signedQuote,
@@ -481,20 +496,20 @@ export class QuotesService {
                 signedAt: signedQuote.signedAt,
             });
         } catch (error) {
-            this.logger.error('Failed to dispatch QUOTE_SIGNED webhook', error);
+            logger.error('Failed to dispatch QUOTE_SIGNED webhook', { category: 'quote', details: { error } });
         }
 
         try {
-            this.logger.log(`Uploading signed quote ${id} to storage providers...`);
+            logger.info(`Uploading signed quote ${id} to storage providers...`, { category: 'quote' });
             const pdfBuffer = await this.getQuotePdf(id);
             const uploadedUrls = await StorageUploadService.uploadSignedQuotePdf(id, pdfBuffer);
             if (uploadedUrls.length > 0) {
-                this.logger.log(`Quote ${id} successfully uploaded to ${uploadedUrls.length} storage provider(s)`);
+                logger.info(`Quote ${id} successfully uploaded to ${uploadedUrls.length} storage provider(s)`, { category: 'quote', details: { uploadedUrls } });
             }
         } catch (error) {
-            this.logger.error(
+            logger.error(
                 `Failed to upload signed quote ${id} to storage providers`,
-                error instanceof Error ? error.message : String(error)
+                { category: 'quote', details: { error: error instanceof Error ? error.message : String(error) } }
             );
         }
 
