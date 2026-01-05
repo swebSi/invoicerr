@@ -1,8 +1,6 @@
 services:
   invoicerr:
     image: ghcr.io/invoicerr-app/invoicerr:latest
-    ports:
-      - "80:80"
     environment:
       - DATABASE_URL=postgresql://invoicerr:invoicerr@invoicerr_db:5432/invoicerr_db
 
