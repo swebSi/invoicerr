@@ -1,6 +1,6 @@
 services:
   invoicerr:
-    image: ghcr.io/invoicerr-app/invoicerr:latest
+    image: ghcr.io/invoicerr-app/invoicerr:v1.4.1f
     environment:
       DATABASE_URL: ${DATABASE_URL}
 
