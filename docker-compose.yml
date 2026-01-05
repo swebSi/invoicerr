@@ -1,8 +1,6 @@
 services:
   invoicerr:
     image: ghcr.io/invoicerr-app/invoicerr:latest
-    ports:
-      - "80:80"
     environment:
       DATABASE_URL: ${DATABASE_URL}
 
